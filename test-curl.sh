@@ -2,7 +2,7 @@
 
 set -e # exit on any error
 
-DATASETS="http://localhost:8080/datasets/"
+DATASETS="http://localhost:8080/datasets"
 
 function checkResponse {
   # read first line (eliminate carriage returns and skip '100 Continue' blocks)
@@ -517,8 +517,48 @@ echo "=== Non-existent dataset should 404 ==="
 curl -G -s -D 67-headers $DATASETS/not-a-dataset/data?graph=http://example.com/ >/dev/null
 checkResponse 404 < 67-headers
 
-curl -G -s -D 67-headers $DATASET/data?graph=http://example.com/
-checkResponse 200 < 67-headers
+curl -G -s -D 68-headers $DATASET/data?graph=http://example.com/
+checkResponse 200 < 68-headers
+
+curl -G -s -D 69-headers $DATASETS/not-a-dataset/query \
+  --data-urlencode "query=SELECT * WHERE { GRAPH <$GRAPH> { ?s ?p ?o } }"
+checkResponse 404 < 69-headers
+
+# Copy a graph from another dataset
+
+echo "=== Copying of graphs ==="
+
+curl -s -D 70-headers -o 70-body -X POST $DATASETS
+checkResponse 201 < 70-headers
+DSOURCE=$(extractLocation < 70-headers)
+
+curl -s -D 71-headers -H "Content-Type: text/turtle" $DSOURCE/data?graph=$GRAPH  \
+	  --data "<a> <b> <c>, <d>" > 71-body
+checkResponse 200 < 71-headers
+
+function extractRevisions {
+  str=$(grep "^<.*/revisions/.*>$" | sed 's/<//' | sed 's/>//')
+  if [ -z "$str" ]; then
+    >&2 echo "NULL revision"
+    exit 1
+  fi
+  echo "$str" | tr -d '\r'
+}
+
+curl -s -D 72-headers -o 72-body $DSOURCE
+checkResponse 200 < 72-headers
+RSOURCE=$(extractRevisions < 72-body)
+
+curl -s -D 73-headers -o 73-body -X POST $DATASETS
+checkResponse 201 < 73-headers
+DSINK=$(extractLocation < 73-headers)
+
+curl -s -D 74-headers -X POST "$DSINK/data?graph=$GRAPH&copyOf=$RSOURCE" > 74-body
+checkResponse 200 < 74-headers
+
+curl $DSINK
+
+curl $DSINK/data?graph=$GRAPH
 
 # TODO: update query with using list
 
