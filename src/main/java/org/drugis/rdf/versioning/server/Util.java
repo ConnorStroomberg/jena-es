@@ -1,6 +1,7 @@
 package org.drugis.rdf.versioning.server;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 import java.util.Observable;
 import java.util.Observer;
 
@@ -8,6 +9,7 @@ import javax.servlet.http.HttpServletRequest;
 
 import org.apache.commons.codec.binary.Base64;
 import org.drugis.rdf.versioning.store.DatasetGraphEventSourcing;
+import org.drugis.rdf.versioning.store.DatasetNotFoundException;
 import org.drugis.rdf.versioning.store.EventSource;
 
 import com.hp.hpl.jena.graph.Graph;
@@ -83,6 +85,16 @@ public class Util {
 		transactional.end();
 		return graph;
 	}
+	
+	public static void assertDatasetExists(EventSource eventSource, Node dataset) {
+		Transactional transactional = (Transactional)eventSource.getDataStore();
+		transactional.begin(ReadWrite.READ);
+		boolean exists = eventSource.datasetExists(dataset);
+		transactional.end();
+		if (!exists) {
+			throw new DatasetNotFoundException(dataset);
+		}
+	}
 
 	static String decodeHeader(String value) {
 		return new String(Base64.decodeBase64(value), StandardCharsets.UTF_8);
@@ -112,6 +124,36 @@ public class Util {
 		}
 		
 		return graph;
+	}
+
+	public static Node getUniqueOptionalObject(Iterator<Triple> result) {
+		if (result.hasNext()) {
+			Node object = result.next().getObject();
+			if (result.hasNext()) {
+				throw new IllegalStateException("Multiple subjects on property of arity 1");
+			}
+			return object;
+		}
+		return null;
+	}
+
+	public static Node getUniqueObject(Iterator<Triple> result) {
+		Node object = getUniqueOptionalObject(result);
+		if (object == null) {
+			throw new IllegalStateException("Zero subjects on property of arity 1");
+		}
+		return object;
+	}
+
+	public static Node getUniqueOptionalSubject(Iterator<Triple> result) {
+		if (result.hasNext()) {
+			Node subject = result.next().getSubject();
+			if (result.hasNext()) {
+				throw new IllegalStateException("Multiple subjects on property of arity 1");
+			}
+			return subject;
+		}
+		return null;
 	}
 
 }

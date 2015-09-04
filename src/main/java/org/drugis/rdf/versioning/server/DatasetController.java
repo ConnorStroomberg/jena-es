@@ -1,6 +1,8 @@
 package org.drugis.rdf.versioning.server;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
 import com.hp.hpl.jena.graph.Graph;
+import com.hp.hpl.jena.graph.GraphUtil;
 import com.hp.hpl.jena.graph.Node;
 import com.hp.hpl.jena.graph.NodeFactory;
 import com.hp.hpl.jena.graph.Triple;
@@ -33,7 +36,9 @@ import com.hp.hpl.jena.vocabulary.RDF;
 public class DatasetController {
 	@Autowired EventSource eventSource;
 	@Autowired String datasetInfoQuery;
+	@Autowired String currentMergedRevisionsQuery;
 	@Autowired String datasetHistoryQuery;
+	@Autowired String allMergedRevisionsQuery;
 	Log d_log = LogFactory.getLog(getClass());
 
 	@RequestMapping(value="", method=RequestMethod.GET, produces="text/html")
@@ -64,16 +69,20 @@ public class DatasetController {
 
 	@RequestMapping(value="", method=RequestMethod.GET, produces="application/json")
 	@ResponseBody
-	public List<String> listAsJson() {
+	public List<DatasetInfo> listAsJson() {
 		d_log.debug("Dataset LIST");
-		List<String> jsonResponse = new ArrayList<>();
+		List<DatasetInfo> jsonResponse = new ArrayList<>();
 		Transactional transactional = (Transactional)eventSource.getDataStore();
 		transactional.begin(ReadWrite.READ);
 		try {
-			ExtendedIterator<Triple> find = eventSource.getDataStore().getDefaultGraph().find(Node.ANY, RDF.Nodes.type, EventSource.esClassDataset);
+			Graph graph = eventSource.getDataStore().getDefaultGraph();
+			ExtendedIterator<Triple> find = graph.find(Node.ANY, RDF.Nodes.type, EventSource.esClassDataset);
 			while (find.hasNext()) {
 				Triple triple = find.next();
-				jsonResponse.add(triple.getSubject().getURI());
+				Node dataset = triple.getSubject();
+				Node head = Util.getUniqueOptionalObject(graph.find(dataset, EventSource.esPropertyHead, Node.ANY));
+				Node creator = Util.getUniqueOptionalObject(graph.find(dataset, EventSource.dctermsCreator, Node.ANY));
+				jsonResponse.add(new DatasetInfo(dataset.getURI(), head != null ? head.getURI() : null, creator != null ? creator.getURI() : null));
 			}
 		} finally {
 			transactional.end();
@@ -98,9 +107,15 @@ public class DatasetController {
 	@ResponseBody
 	public Graph get(@PathVariable String id) {
 		d_log.debug("Dataset GET " + id);
+		
+		String uri = eventSource.getDatasetUri(id);
+		Util.assertDatasetExists(eventSource, NodeFactory.createURI(uri));
 
-		String query = datasetInfoQuery.replaceAll("\\$dataset", "<" + eventSource.getDatasetUri(id) + ">");
-		return Util.queryDataStore(eventSource, query);
+		String query = datasetInfoQuery.replaceAll("\\$dataset", "<" + uri + ">");
+		Graph info = Util.queryDataStore(eventSource, query);
+		String queryMerged = currentMergedRevisionsQuery.replaceAll("\\$dataset", "<" + uri + ">");
+		GraphUtil.addInto(info, Util.queryDataStore(eventSource, queryMerged));
+		return info;
 	}
 
 	@RequestMapping(value="/{id}/history", method=RequestMethod.GET)
@@ -108,7 +123,13 @@ public class DatasetController {
 	public Graph history(@PathVariable String id) {
 		d_log.debug("Dataset GET " + id + "/history");
 
-		String query = datasetHistoryQuery.replaceAll("\\$dataset", "<" + eventSource.getDatasetUri(id) + ">");
-		return Util.queryDataStore(eventSource, query);
+		String uri = eventSource.getDatasetUri(id);
+		Util.assertDatasetExists(eventSource, NodeFactory.createURI(uri));
+
+		String query = datasetHistoryQuery.replaceAll("\\$dataset", "<" + uri + ">");
+		Graph history = Util.queryDataStore(eventSource, query);
+		String queryMerged = allMergedRevisionsQuery.replaceAll("\\$dataset", "<" + uri + ">");
+		GraphUtil.addInto(history, Util.queryDataStore(eventSource, queryMerged));
+		return history;
 	}
 }
